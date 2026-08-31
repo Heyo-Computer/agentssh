@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}sessions — agentssh{% endblock %}
+{% block content %}
+<h2>sessions{% if let Some(c) = filter %} for context {{ c }}{% endif %}</h2>
+{% if sessions.is_empty() %}
+<p class="muted">no sessions</p>
+{% else %}
+<table>
+  <tr><th>id</th><th>context</th><th>kind</th><th>status</th><th>started</th><th>duration</th><th>exit</th><th>command</th></tr>
+  {% for s in sessions %}
+  <tr>
+    <td><a href="/sessions/{{ s.id }}">{{ s.id }}</a></td>
+    <td><a href="/sessions?context={{ s.context }}">{{ s.context }}</a></td>
+    <td>{{ s.kind }}</td>
+    <td class="status-{{ s.status }}">{{ s.status }}</td>
+    <td>{{ s.started }}</td>
+    <td>{{ s.duration }}</td>
+    <td>{{ s.exit }}</td>
+    <td class="cmd">{{ s.command }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

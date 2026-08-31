@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ s.id }} — agentssh{% endblock %}
+{% block content %}
+<h2>session {{ s.id }}</h2>
+<dl>
+  <dt>context</dt><dd>{{ s.context }}</dd>
+  <dt>kind</dt><dd>{{ s.kind }}</dd>
+  <dt>status</dt><dd class="status-{{ s.status }}">{{ s.status }}</dd>
+  {% if !s.command.is_empty() %}<dt>command</dt><dd class="cmd">{{ s.command }}</dd>{% endif %}
+  <dt>started</dt><dd>{{ s.started }}</dd>
+  {% if !s.ended.is_empty() %}<dt>ended</dt><dd>{{ s.ended }}</dd>{% endif %}
+  {% if !s.exit.is_empty() %}<dt>exit code</dt><dd>{{ s.exit }}</dd>{% endif %}
+</dl>
+
+{% if !segments.is_empty() %}
+<h2>segments</h2>
+<table>
+  <tr><th>#</th><th>connected</th><th>disconnected</th><th>reason</th></tr>
+  {% for seg in segments %}
+  <tr>
+    <td>{{ loop.index }}</td>
+    <td>{{ seg.connected }}</td>
+    <td>{{ seg.disconnected }}</td>
+    <td>{{ seg.reason }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>playback</h2>
+<div class="player-wrap"><div id="player"></div></div>
+<script src="/assets/player.min.js"></script>
+<script>
+  AsciinemaPlayer.create('/sessions/{{ s.id }}/cast', document.getElementById('player'), {
+    idleTimeLimit: 2,
+    fit: 'width',
+    theme: 'dracula'
+  });
+</script>
+{% endblock %}

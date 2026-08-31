@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>contexts</h2>
+{% if contexts.is_empty() %}
+<p class="muted">no contexts configured</p>
+{% else %}
+<table>
+  <tr><th>name</th><th>host</th><th>user</th></tr>
+  {% for c in contexts %}
+  <tr>
+    <td>{{ c.name }}</td>
+    <td>{{ c.host }}</td>
+    <td>{{ c.user }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>recent sessions</h2>
+{% if sessions.is_empty() %}
+<p class="muted">no sessions recorded yet</p>
+{% else %}
+<table>
+  <tr><th>id</th><th>context</th><th>kind</th><th>status</th><th>started</th><th>command</th></tr>
+  {% for s in sessions %}
+  <tr>
+    <td><a href="/sessions/{{ s.id }}">{{ s.id }}</a></td>
+    <td>{{ s.context }}</td>
+    <td>{{ s.kind }}</td>
+    <td class="status-{{ s.status }}">{{ s.status }}</td>
+    <td>{{ s.started }}</td>
+    <td class="cmd">{{ s.command }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}
