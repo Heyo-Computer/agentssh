@@ -58,6 +58,15 @@ agentssh web                           # http://127.0.0.1:8787
   command line for the audit trail. A dropped `run` is not resumed — a
   half-executed command can't be safely retried.
 
+## Claude Code skills
+
+`skills/` holds four Claude Code skills that drive this tool, so an agent's
+remote work lands in the audit trail instead of an unrecorded `ssh` call:
+`/ssh` (run work on a host), `/ssh-contexts`, `/ssh-sessions`, and
+`/ssh-files` (transfer, since agentssh has no scp). Install with
+`./skills/install.sh` — it symlinks them into `~/.claude/skills`. See
+[skills/README.md](skills/README.md).
+
 ## Notes
 
 - Interactive recordings include keystrokes (`"i"` events) for full

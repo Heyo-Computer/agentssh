@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# agentssh-put <context> <local-file> <remote-path> [--mode 0644]
+#
+# Copy a local file to a remote host over the audited agentssh channel.
+# agentssh has no scp/sftp, and `run` forwards no stdin, so the payload rides
+# in the command line itself as base64. Linux caps a single exec argument at
+# 128 KiB (MAX_ARG_STRLEN), so the payload is sent in 64 KiB chunks and
+# reassembled remotely. Transfer is verified by sha256 and fails loudly.
+set -euo pipefail
+
+usage() { echo "usage: agentssh-put <context> <local-file> <remote-path> [--mode 0644]" >&2; exit 2; }
+[ $# -ge 3 ] || usage
+ctx=$1 local=$2 remote=$3; shift 3
+mode=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --mode) mode=${2:-}; shift 2 ;;
+    *) usage ;;
+  esac
+done
+
+[ -f "$local" ] || { echo "agentssh-put: no such file: $local" >&2; exit 1; }
+
+# Single-quote a string for the *remote* shell. agentssh escapes each argv
+# entry for transport; this handles quoting inside the `sh -c` script itself.
+sq() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+rq=$(sq "$remote"); tq=$(sq "$remote.agentssh-part")
+
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+base64 -w0 "$local" > "$tmp/payload.b64"
+split -b 65536 -d -a 4 "$tmp/payload.b64" "$tmp/chunk."
+n=$(find "$tmp" -name 'chunk.*' | wc -l)
+bytes=$(wc -c < "$local")
+echo "agentssh-put: $local -> $ctx:$remote ($bytes bytes, $n chunk(s))" >&2
+
+op='>'
+for f in "$tmp"/chunk.*; do
+  c=$(cat "$f")
+  agentssh run "$ctx" -- sh -c "mkdir -p \"\$(dirname $rq)\" && printf %s '$c' $op $tq" >/dev/null
+  op='>>'
+done
+
+want=$(sha256sum "$local" | cut -d' ' -f1)
+got=$(agentssh run "$ctx" -- sh -c \
+  "base64 -d $tq > $rq && rm -f $tq && { sha256sum $rq 2>/dev/null || shasum -a 256 $rq; } | cut -d' ' -f1")
+got=${got//[$'\r\n ']/}
+
+if [ "$want" != "$got" ]; then
+  echo "agentssh-put: CHECKSUM MISMATCH (local $want, remote $got) — remote file left in place for inspection" >&2
+  exit 1
+fi
+if [ -n "$mode" ]; then agentssh run "$ctx" -- sh -c "chmod $mode $rq" >/dev/null; fi
+echo "agentssh-put: ok, sha256 $want" >&2
