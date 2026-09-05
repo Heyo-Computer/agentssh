@@ -48,8 +48,14 @@ pub async fn connect(context_name: &str, record_input: bool) -> Result<i32> {
 pub async fn attach(prefix: &str, record_input: bool) -> Result<i32> {
     let conn = store::open()?;
     let session = store::find_session(&conn, prefix)?;
-    if session.kind != "connect" {
-        anyhow::bail!("session {} was a one-shot run; only connect sessions can be attached", session.id);
+    // Anything with a remote tmux session behind it can be attached — that
+    // includes an agent's persistent `shell`, so a user can watch or take over
+    // the session an agent is working in.
+    if session.tmux_name.is_none() {
+        anyhow::bail!(
+            "session {} was a one-shot `run`; only tmux-backed sessions (connect, shell) can be attached",
+            session.id
+        );
     }
     if session.status == "closed" {
         anyhow::bail!(

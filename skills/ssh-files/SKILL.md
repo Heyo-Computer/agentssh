@@ -12,6 +12,10 @@ can't be piped to a remote command. Two scripts ship with this skill and handle
 it properly, sending the payload as base64 inside the command line and
 verifying the result by sha256.
 
+They use `agentssh run`, not `agentssh exec`, on purpose: a transfer needs
+byte-exact stdout with stderr kept separate, which is exactly what the
+one-shot channel gives and what a persistent shell does not.
+
 Use these rather than reaching for `scp`/`rsync` directly: those bypass the
 audit trail and need credentials this session doesn't hold.
 
@@ -37,8 +41,8 @@ If the file is something you want to *read* rather than keep, skip the
 round trip and just print it:
 
 ```bash
-agentssh run <context> -- cat /etc/nginx/nginx.conf
-agentssh run <context> -- tail -n 200 /var/log/syslog
+agentssh exec <context> -- cat /etc/nginx/nginx.conf
+agentssh exec <context> -- tail -n 200 /var/log/syslog
 ```
 
 ## Size limits, and why chunking exists
@@ -54,7 +58,7 @@ is fine, tens of MB is slow and noisy in the session log. For anything that
 large, prefer having the remote fetch it itself:
 
 ```bash
-agentssh run <context> -- sh -c 'curl -fsSL <url> -o /tmp/artifact && sha256sum /tmp/artifact'
+agentssh exec <context> -- eval 'curl -fsSL <url> -o /tmp/artifact && sha256sum /tmp/artifact'
 ```
 
 Requirements: `base64` and `sha256sum` (or `shasum`) on the remote — present on
@@ -66,11 +70,11 @@ Don't try to drive `sed -i` blind. Pull it down, edit it locally with real
 tools, push it back — and back up the original first:
 
 ```bash
-agentssh run us2 -- cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak
+agentssh exec us2 -- cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak
 ~/.claude/skills/ssh-files/scripts/agentssh-get us2 /etc/nginx/nginx.conf ./nginx.conf
 # edit ./nginx.conf locally
 ~/.claude/skills/ssh-files/scripts/agentssh-put us2 ./nginx.conf /etc/nginx/nginx.conf
-agentssh run us2 -- nginx -t          # validate before reloading
+agentssh exec us2 -- nginx -t          # validate before reloading
 ```
 
 Confirm with the user before overwriting any file outside `/tmp` on a remote

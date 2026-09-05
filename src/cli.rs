@@ -12,7 +12,27 @@ pub enum Command {
     /// Manage remote server contexts
     #[command(subcommand)]
     Context(ContextCmd),
-    /// Run a single command on a context's remote host
+    /// Run a command in the context's persistent remote shell, starting one if
+    /// needed. Working directory, environment, and shell state carry over from
+    /// the previous `exec` on the same context.
+    Exec {
+        /// Context name
+        context: String,
+        /// Abort if the command runs longer than this many seconds (the command
+        /// is then interrupted, as Ctrl-C would)
+        #[arg(long)]
+        timeout: Option<u64>,
+        /// End any existing shell for this context and start from a clean one
+        #[arg(long)]
+        fresh: bool,
+        /// Command and arguments to run remotely
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
+    },
+    /// Manage the persistent remote shells that `exec` runs in
+    #[command(subcommand)]
+    Shell(ShellCmd),
+    /// Run a single command on its own connection, with no shell state
     Run {
         /// Context name
         context: String,
@@ -51,6 +71,31 @@ pub enum Command {
         /// Required to bind a non-loopback address (the UI has no authentication)
         #[arg(long)]
         allow_remote: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ShellCmd {
+    /// Open a persistent shell for a context without running anything in it
+    Start { context: String },
+    /// List persistent shells
+    List {
+        /// Include shells that have already ended
+        #[arg(long)]
+        all: bool,
+    },
+    /// Interrupt whatever a shell is currently running (Ctrl-C)
+    Interrupt {
+        /// Context name, or a session id prefix
+        target: String,
+    },
+    /// End a persistent shell and kill its remote tmux session
+    Stop {
+        /// Context name, or a session id prefix
+        target: Option<String>,
+        /// Stop every open shell
+        #[arg(long, conflicts_with = "target")]
+        all: bool,
     },
 }
 

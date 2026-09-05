@@ -16,7 +16,7 @@
     <td>{{ s.started }}</td>
     <td>{{ s.duration }}</td>
     <td>{{ s.exit }}</td>
-    <td class="cmd">{{ s.command }}</td>
+    <td class="cmd" title="{{ s.command }}">{{ s.summary }}</td>
   </tr>
   {% endfor %}
 </table>

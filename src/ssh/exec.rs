@@ -44,15 +44,56 @@ pub async fn run(ssh: &Ssh, command: &str, recorder: &mut Writer) -> Result<Exec
 
 /// Run a command and capture its exit status only (used for remote probes).
 pub async fn probe(ssh: &Ssh, command: &str) -> Result<Option<u32>> {
+    Ok(capture(ssh, command, None).await?.exit_code)
+}
+
+pub struct Captured {
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub exit_code: Option<u32>,
+}
+
+impl Captured {
+    pub fn ok(&self) -> bool {
+        self.exit_code == Some(0)
+    }
+
+    /// Trimmed stdout, for the small bookkeeping commands this is used for.
+    pub fn out(&self) -> String {
+        String::from_utf8_lossy(&self.stdout).trim().to_string()
+    }
+
+    /// Trimmed stderr — what to put in an error message when a remote
+    /// bookkeeping command fails.
+    pub fn err(&self) -> String {
+        String::from_utf8_lossy(&self.stderr).trim().to_string()
+    }
+}
+
+/// Run one command over an exec channel and collect its output rather than
+/// streaming it — for agentssh's own bookkeeping (tmux control commands,
+/// reading a captured exit code), which is not part of the audited transcript.
+///
+/// `stdin` is written to the channel and then closed. That is how a command
+/// line gets onto the remote host without being quoted into an argv: the bytes
+/// travel as data, so no amount of quoting, backslashes, or newlines in the
+/// user's command can change what the remote shell ends up running.
+pub async fn capture(ssh: &Ssh, command: &str, stdin: Option<&[u8]>) -> Result<Captured> {
     let mut channel = ssh.handle.channel_open_session().await?;
     channel.exec(true, command).await?;
-    let mut exit_code = None;
+    if let Some(data) = stdin {
+        channel.data(data).await?;
+        channel.eof().await?;
+    }
+    let mut got = Captured { stdout: Vec::new(), stderr: Vec::new(), exit_code: None };
     while let Some(msg) = channel.wait().await {
         match msg {
-            ChannelMsg::ExitStatus { exit_status } => exit_code = Some(exit_status),
+            ChannelMsg::Data { ref data } => got.stdout.extend_from_slice(data),
+            ChannelMsg::ExtendedData { ref data, .. } => got.stderr.extend_from_slice(data),
+            ChannelMsg::ExitStatus { exit_status } => got.exit_code = Some(exit_status),
             ChannelMsg::Close => break,
             _ => {}
         }
     }
-    Ok(exit_code)
+    Ok(got)
 }

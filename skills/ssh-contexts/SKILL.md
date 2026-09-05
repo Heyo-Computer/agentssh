@@ -85,3 +85,14 @@ agentssh run <name> -- uname -sr
 Exit `0` means address, auth, and host key all check out. Exit `255` is a
 transport or auth failure — re-check with `agentssh context show <name>` and
 `ssh-add -l`.
+
+Use `run` for this check, not `exec`: it needs nothing on the remote, so it
+isolates a connectivity problem from a missing `tmux`. If you then want the
+persistent shell `/ssh` normally works in, confirm `tmux` is there too:
+
+```bash
+agentssh exec <name> -- uname -sr
+```
+
+If that fails with "tmux is required", install it on the host or stick to
+`agentssh run` for that context.

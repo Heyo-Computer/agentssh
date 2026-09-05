@@ -6,7 +6,7 @@ in an unrecorded `ssh` invocation.
 
 | Skill | What it's for |
 | --- | --- |
-| `/ssh` | Run work on a host: `/ssh to us2 and restart nginx` |
+| `/ssh` | Run work on a host in a persistent shell: `/ssh to us2 and restart nginx` |
 | `/ssh-contexts` | Add, inspect, and remove the named servers `/ssh` connects to |
 | `/ssh-sessions` | Read back the audit trail — list, show, export, replay, reattach |
 | `/ssh-files` | Move files over the audited channel (agentssh has no scp) |

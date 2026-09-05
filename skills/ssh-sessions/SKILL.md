@@ -7,11 +7,12 @@ allowed-tools: [Bash, Read, Glob, Grep]
 
 # /ssh-sessions — the agentssh audit trail
 
-Every `agentssh run` and `agentssh connect` writes an
+Every `agentssh run`, `agentssh exec`, and `agentssh connect` writes an
 [asciicast v2](https://docs.asciinema.org/manual/asciicast/v2/) recording to
 `~/.local/share/agentssh/recordings/` (mode `0600`), with metadata in a local
 SQLite database. One recording covers one logical session, spanning all its
-reconnects.
+reconnects — and for a persistent shell, **every command run in it**, so the
+whole run of work replays as a single terminal session.
 
 ## List
 
@@ -22,9 +23,25 @@ agentssh sessions list --active             # only active or resumable
 agentssh sessions list --limit 100
 ```
 
-Columns: id, context, kind (`run` / `connect`), status, start time, exit code,
-command. A blank exit code means no remote exit status arrived — the connection
-dropped, or the session timed out.
+Columns: id, context, kind, status, start time, exit code, command. A blank
+exit code means no remote exit status arrived — the connection dropped, or the
+session timed out. The command is collapsed to one line to keep the table
+readable; `sessions show` has the full text.
+
+Three kinds:
+
+| kind | what it is |
+| --- | --- |
+| `exec`-backed `shell` | a persistent remote shell; its `command` column shows how many commands have gone through it and the most recent one |
+| `run` | one command on its own connection |
+| `connect` | an interactive session a person drove |
+
+Persistent shells have their own listing, which is usually what you want:
+
+```bash
+agentssh shell list          # open shells: context, command count, last command
+agentssh shell list --all    # including ones that have ended
+```
 
 ## Show one session
 
@@ -36,6 +53,10 @@ Takes a **unique id prefix**, not just the full id — `agentssh sessions show
 1967064d` is enough. Prints metadata, exit code, the recording path, the
 connection segments (one row per connect/reconnect, so drops are visible), and
 a tail of the output.
+
+For a shell session it also prints the **command list**: every command run in
+that shell, in order, with its start time and exit code. That is the fastest
+way to answer "what did the agent actually do on this box?".
 
 For the *full* output rather than the tail, export it:
 
@@ -70,15 +91,24 @@ Binds loopback and has **no authentication** — binding anything else requires
 understands it exposes an unauthenticated UI. Run it in the background and hand
 the user the URL.
 
+A session page has the metadata, the command list for a shell session, a
+replayable terminal player, and links to the raw `.cast` and to a plain-text
+transcript at `/sessions/<id>/text`.
+
 ## Reattach a dropped or detached session
 
-Interactive sessions run inside a remote `tmux`, so their processes survive a
-disconnect. Find a resumable one with `agentssh sessions list --active`, then
-have the **user** run it — it needs a terminal you can't drive:
+Both interactive sessions and persistent shells run inside a remote `tmux`, so
+their processes survive a disconnect and either can be attached. Find a
+resumable one with `agentssh sessions list --active`, then have the **user**
+run it — it needs a terminal you can't drive:
 
 ```
 ! agentssh attach <id-prefix>
 ```
+
+Attaching to a shell an agent is using drops the user into that exact live
+shell, so they can watch the work happen or take over. Detaching leaves it
+running and the agent picks up where it left off.
 
 ## Delete
 

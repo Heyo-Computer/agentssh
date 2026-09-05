@@ -29,7 +29,7 @@
     <td>{{ s.kind }}</td>
     <td class="status-{{ s.status }}">{{ s.status }}</td>
     <td>{{ s.started }}</td>
-    <td class="cmd">{{ s.command }}</td>
+    <td class="cmd" title="{{ s.command }}">{{ s.summary }}</td>
   </tr>
   {% endfor %}
 </table>

@@ -10,7 +10,7 @@ mod web;
 use anyhow::Result;
 use clap::Parser;
 
-use cli::{Cli, Command, ContextCmd, SessionsCmd};
+use cli::{Cli, Command, ContextCmd, SessionsCmd, ShellCmd};
 
 #[tokio::main]
 async fn main() {
@@ -43,6 +43,15 @@ async fn run(cli: Cli) -> Result<i32> {
         Command::Run { context, timeout, command } => {
             session::run::run(&context, &command, timeout).await
         }
+        Command::Exec { context, timeout, fresh, command } => {
+            session::shell::exec(&context, &command, timeout, fresh).await
+        }
+        Command::Shell(cmd) => match cmd {
+            ShellCmd::Start { context } => session::shell::start(&context).await,
+            ShellCmd::List { all } => session::shell::list(all),
+            ShellCmd::Interrupt { target } => session::shell::interrupt(&target).await,
+            ShellCmd::Stop { target, all } => session::shell::stop(target.as_deref(), all).await,
+        },
         Command::Connect { context, no_record_input } => {
             session::interactive::connect(&context, !no_record_input).await
         }

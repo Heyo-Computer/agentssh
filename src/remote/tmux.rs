@@ -16,8 +16,10 @@ pub async fn require_tmux(ssh: &Ssh, host: &str) -> Result<()> {
     match exec::probe(ssh, "command -v tmux >/dev/null 2>&1").await? {
         Some(0) => Ok(()),
         _ => bail!(
-            "tmux is required on {host} for interactive sessions but was not found.\n\
-             Install it there first (e.g. apt install tmux / dnf install tmux)."
+            "tmux is required on {host} for persistent shells and interactive sessions, \
+             but was not found.\n\
+             Install it there (e.g. apt install tmux / dnf install tmux), or use \
+             `agentssh run` instead, which needs nothing on the remote."
         ),
     }
 }

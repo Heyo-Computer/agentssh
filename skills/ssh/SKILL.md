@@ -28,71 +28,136 @@ named at all and exactly one exists, use it; otherwise ask which one.
 ## Step 2 — run the work
 
 ```bash
-agentssh run <context> -- <argv...>
+agentssh exec <context> -- <argv...>
+```
+
+`exec` runs your command in a **persistent shell** on the host — a real login
+shell kept alive inside remote `tmux`. It opens on your first `exec` and every
+later `exec` types into the same shell, so working directory, exported
+variables, an activated virtualenv, and shell history all carry across calls:
+
+```bash
+agentssh exec us2 -- cd /srv/app        # sticks
+agentssh exec us2 -- export RAILS_ENV=production
+agentssh exec us2 -- ./bin/status       # runs in /srv/app, with RAILS_ENV set
 ```
 
 Exit codes pass through: the remote command's code becomes the local one.
 `255` means transport failure or timeout, not a remote exit code.
-Remote stdout/stderr stream through unmodified, so `> file`, `| grep`, and
-`$(...)` capture on the **local** side all work normally.
 
-### The one rule that trips everything up
+## The one rule that trips everything up
 
 Everything after `--` is argv. agentssh shell-escapes each argument and joins
-them into a single remote command line, so **shell syntax written as one
-argument is not shell syntax** — it becomes the command name:
+them into a single command line, so **shell syntax written as one argument is
+not shell syntax** — it becomes the command name:
 
 ```bash
-agentssh run us2 -- 'echo hi | wc -c'      # ✗ "command not found", exit 127
-agentssh run us2 -- sh -c 'echo hi | wc -c' # ✓ prints 6
+agentssh exec us2 -- 'echo hi | wc -c'        # ✗ "command not found", exit 127
+agentssh exec us2 -- eval 'echo hi | wc -c'   # ✓ prints 6
 ```
 
-Wrap in `sh -c '...'` whenever you need a pipe, redirect, glob, `&&`/`||`,
-a remote `$VAR`, a `cd`, or a heredoc. Plain argv (`uname -sr`,
-`systemctl status nginx`) needs no wrapper.
+Reach for `eval '...'` whenever you need a pipe, redirect, glob, `&&`/`||`, a
+remote `$VAR`, or a heredoc. `eval` is a shell builtin, so the script runs
+**inside** the persistent shell and its `cd`s and `export`s stick:
+
+```bash
+agentssh exec us2 -- eval 'cd /srv/app && export TAG=$(git rev-parse --short HEAD)'
+agentssh exec us2 -- eval 'echo "deploying $TAG from $PWD"'   # both still set
+```
+
+`sh -c '...'` also works and is what you want for a **throwaway** subshell —
+but it is a separate process, so nothing it changes survives the call:
+
+```bash
+agentssh exec us2 -- sh -c 'cd /tmp && pwd'   # prints /tmp
+agentssh exec us2 -- pwd                      # unchanged — still /srv/app
+```
+
+Plain argv (`uname -sr`, `systemctl status nginx`) needs no wrapper at all, and
+multi-word arguments keep their quoting: `-- grep 'foo bar' file` is correct.
 
 ### Batch your probes
 
-Each `agentssh run` opens a **fresh SSH connection**. Three diagnostics should
-be one call, not three:
+Each `agentssh exec` opens a **fresh SSH connection** to type one line into the
+shell. Three diagnostics should be one call, not three:
 
 ```bash
-agentssh run us2 -- sh -c 'uptime; df -h /; free -m; systemctl --failed --no-pager'
+agentssh exec us2 -- eval 'uptime; df -h /; free -m; systemctl --failed --no-pager'
 ```
 
 ### Always bound anything that could hang
 
 ```bash
-agentssh run us2 --timeout 60 -- ./deploy.sh
+agentssh exec us2 --timeout 60 -- ./deploy.sh
 ```
 
-A timed-out session is killed and exits `255`, with the partial output still
-recorded.
+On timeout agentssh sends the shell a **Ctrl-C**, exits `255`, and keeps
+whatever the command printed before it was cut off. If the command ignores
+SIGINT the shell is left busy, and the next `exec` refuses rather than typing
+over a running command — that message tells you what to do:
+
+```bash
+agentssh shell interrupt us2     # try again, harder
+agentssh shell stop us2          # give up and kill the shell
+```
+
+A command whose result arrives after you stopped waiting is not lost: the next
+`exec` collects its output and exit code into the audit trail first.
+
+## When to use `run` instead
+
+```bash
+agentssh run <context> -- <argv...>
+```
+
+`run` is the one-shot form: its own connection, its own exec channel, no shell
+state, no tmux. Use it when you need one of the three things `exec` gives up:
+
+- **Byte-exact stdout.** `exec` merges stderr into stdout (that is what the
+  recording shows). If you're capturing output locally — `$(...)`, `> file`,
+  piping base64 — use `run`.
+- **Streaming.** `exec` returns a command's output when it finishes; `run`
+  streams it as it arrives.
+- **A host without `tmux`.** `exec` needs it; `run` needs nothing.
+
+`run` is also the right call for anything that must not share state with the
+rest of your work, and it is what `/ssh-files` uses under the hood.
 
 ## What this channel cannot do
 
 - **No stdin.** Nothing local can be piped in, and no remote prompt can be
   answered. Use non-interactive flags: `-y`, `--no-pager`,
-  `DEBIAN_FRONTEND=noninteractive`, `ssh-keyscan` over `ssh` etc. `sudo` works
-  only if it's NOPASSWD for that user.
-- **No TTY.** `top`, `vim`, `less`, and anything curses-based will misbehave.
-  Use `top -bn1`, `journalctl --no-pager`, `cat`.
+  `DEBIAN_FRONTEND=noninteractive`. `sudo` works only if it's NOPASSWD.
+- **No TTY.** Commands run with their output redirected to a file, so `top`,
+  `vim`, `less`, and anything curses-based will misbehave. Use `top -bn1`,
+  `journalctl --no-pager`, `cat`.
 - **No file transfer built in.** Use `/ssh-files` — it moves files over this
   same audited channel.
-- **`run` is not resumable.** If the connection drops mid-command, agentssh
-  deliberately does not retry: a half-executed command can't be safely
-  re-run. Re-run it yourself only once you know it's safe to.
-- **Each `run` starts in the login directory.** Use `sh -c 'cd /srv/app && ...'`.
+- **Nothing is resumable mid-command.** If the connection drops while a command
+  is running, the command keeps going in the remote shell and its result is
+  collected on your next `exec` — but agentssh will not re-run it for you.
 
 ## Long-running work
 
-`run` holds the connection for the command's lifetime. For something that must
-outlive the session, detach it on the remote:
+For something that must outlive the command, detach it on the remote:
 
 ```bash
-agentssh run us2 -- sh -c 'nohup ./long-job.sh > /tmp/job.log 2>&1 & echo started'
-agentssh run us2 -- tail -n 50 /tmp/job.log      # poll later
+agentssh exec us2 -- eval 'nohup ./long-job.sh > /tmp/job.log 2>&1 & echo started'
+agentssh exec us2 -- tail -n 50 /tmp/job.log      # poll later
 ```
+
+## Shell housekeeping
+
+```bash
+agentssh shell list        # open shells, how many commands each has run
+agentssh shell stop us2    # end one and kill its remote tmux session
+agentssh exec us2 --fresh -- pwd   # discard the old shell, start clean
+```
+
+Stop the shell when you're finished with the host — it costs nothing to
+reopen, and leaving `tmux` sessions behind on servers is untidy. A shell whose
+remote `tmux` has died (host rebooted, someone typed `exit`) is detected and
+replaced automatically, so you never have to check first.
 
 ## When you need a real interactive shell
 
@@ -102,11 +167,15 @@ You can't drive one. Hand it to the user — tell them to run, in this session:
 ! agentssh connect <context>
 ```
 
-That opens a shell inside a remote `tmux` session (so a dropped link
-reconnects with processes and cwd intact), still fully recorded. Detach with
-`C-b d`; resume later with `agentssh attach <session-id-prefix>`. Note that
-interactive sessions record keystrokes too — mention `--no-record-input` if
-they'll be typing a password.
+They can also **attach to the shell you are working in**, which is often more
+useful — same tmux session, live:
+
+```
+! agentssh attach <shell-id-prefix>      # id from: agentssh shell list
+```
+
+Detach with `C-b d`. Note that interactive sessions record keystrokes too;
+mention `--no-record-input` if they'll be typing a password.
 
 ## Before destructive commands
 

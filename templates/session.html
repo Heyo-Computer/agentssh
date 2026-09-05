@@ -6,11 +6,31 @@
   <dt>context</dt><dd>{{ s.context }}</dd>
   <dt>kind</dt><dd>{{ s.kind }}</dd>
   <dt>status</dt><dd class="status-{{ s.status }}">{{ s.status }}</dd>
-  {% if !s.command.is_empty() %}<dt>command</dt><dd class="cmd">{{ s.command }}</dd>{% endif %}
   <dt>started</dt><dd>{{ s.started }}</dd>
   {% if !s.ended.is_empty() %}<dt>ended</dt><dd>{{ s.ended }}</dd>{% endif %}
+  {% if !s.duration.is_empty() %}<dt>duration</dt><dd>{{ s.duration }}</dd>{% endif %}
   {% if !s.exit.is_empty() %}<dt>exit code</dt><dd>{{ s.exit }}</dd>{% endif %}
 </dl>
+
+{% if !s.command.is_empty() %}
+<h2>command</h2>
+<pre class="cmd">{{ s.command }}</pre>
+{% endif %}
+
+{% if !commands.is_empty() %}
+<h2>commands</h2>
+<table class="commands">
+  <tr><th>#</th><th>started</th><th>exit</th><th>command</th></tr>
+  {% for c in commands %}
+  <tr>
+    <td>{{ c.seq }}</td>
+    <td>{{ c.started }}</td>
+    <td class="{% if c.failed %}exit-bad{% else %}exit-ok{% endif %}">{{ c.exit }}</td>
+    <td><pre class="cmd inline">{{ c.command }}</pre></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
 
 {% if !segments.is_empty() %}
 <h2>segments</h2>
@@ -27,14 +47,19 @@
 </table>
 {% endif %}
 
-<h2>playback</h2>
+<h2>playback <span class="muted links">— <a href="/sessions/{{ s.id }}/text">transcript</a> · <a href="/sessions/{{ s.id }}/cast">.cast</a></span></h2>
 <div class="player-wrap"><div id="player"></div></div>
 <script src="/assets/player.min.js"></script>
 <script>
   AsciinemaPlayer.create('/sessions/{{ s.id }}/cast', document.getElementById('player'), {
+    // Recordings span the whole life of a session — a shell can sit idle for
+    // minutes between commands — so collapse the dead air rather than replaying it.
     idleTimeLimit: 2,
     fit: 'width',
-    theme: 'dracula'
+    theme: 'dracula',
+    markers: true,
+    terminalFontFamily: 'ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace',
+    terminalLineHeight: 1.25
   });
 </script>
 {% endblock %}

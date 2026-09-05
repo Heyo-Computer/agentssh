@@ -34,6 +34,17 @@ impl EventKind {
 pub struct Writer {
     out: BufWriter<fs::File>,
     epoch: OffsetDateTime,
+    /// Translate bare LF to CRLF in recorded output. A PTY session already
+    /// emits CRLF; an exec channel does not, and a terminal emulator treats a
+    /// lone LF as "down one row, keep the column" — so replaying unfixed exec
+    /// output staircases every line off the right edge of the screen.
+    crlf: bool,
+    /// Carried across chunk boundaries so a CR ending one write and an LF
+    /// starting the next is not turned into CR CR LF.
+    pending_cr: bool,
+    /// Whether the cursor is at column 0, so agentssh's own footers can start
+    /// on a fresh line without blank-lining output that already ended in one.
+    at_line_start: bool,
 }
 
 impl Writer {
@@ -46,7 +57,7 @@ impl Writer {
             .open(path)
             .with_context(|| format!("creating recording {}", path.display()))?;
         let epoch = OffsetDateTime::now_utc();
-        let mut w = Writer { out: BufWriter::new(file), epoch };
+        let mut w = Writer { out: BufWriter::new(file), epoch, crlf: false, pending_cr: false, at_line_start: true };
         let header = json!({
             "version": 2,
             "width": cols,
@@ -71,7 +82,7 @@ impl Writer {
             .mode(0o600)
             .open(path)
             .with_context(|| format!("opening recording {}", path.display()))?;
-        Ok(Writer { out: BufWriter::new(file), epoch })
+        Ok(Writer { out: BufWriter::new(file), epoch, crlf: false, pending_cr: false, at_line_start: true })
     }
 
     fn elapsed(&self) -> f64 {
@@ -87,10 +98,62 @@ impl Writer {
         Ok(())
     }
 
+    /// Turn on LF -> CRLF translation for recorded *output*. Set this for
+    /// sessions whose remote end has no PTY (`run`, and every command run in a
+    /// persistent shell); leave it off for real PTY sessions, which already
+    /// send CRLF and would otherwise get doubled carriage returns.
+    pub fn newline_fixup(mut self, on: bool) -> Self {
+        self.crlf = on;
+        self
+    }
+
     /// Record raw terminal bytes (lossy UTF-8 is acceptable for audit purposes;
     /// invalid sequences are replaced, never dropped silently).
     pub fn bytes(&mut self, kind: EventKind, data: &[u8]) -> Result<()> {
+        if !matches!(kind, EventKind::Output) {
+            return self.event(kind, &String::from_utf8_lossy(data));
+        }
+        if let Some(&last) = data.last() {
+            self.at_line_start = last == b'\n';
+        }
+        if self.crlf {
+            let fixed = self.crlf_encode(data);
+            return self.event(kind, &String::from_utf8_lossy(&fixed));
+        }
         self.event(kind, &String::from_utf8_lossy(data))
+    }
+
+    fn crlf_encode(&mut self, data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(data.len() + data.len() / 16);
+        for &b in data {
+            if b == b'\n' && !self.pending_cr {
+                out.push(b'\r');
+            }
+            self.pending_cr = b == b'\r';
+            out.push(b);
+        }
+        out
+    }
+
+    /// Write text agentssh itself generates into the output stream (the echoed
+    /// command line of a shell session, an exit-code footer). Newlines are
+    /// written as CRLF unconditionally: this text is never PTY output.
+    pub fn text(&mut self, data: &str) -> Result<()> {
+        if data.is_empty() {
+            return Ok(());
+        }
+        let fixed = data.replace("\r\n", "\n").replace('\n', "\r\n");
+        self.pending_cr = fixed.ends_with('\r');
+        self.at_line_start = fixed.ends_with('\n');
+        self.event(EventKind::Output, &fixed)
+    }
+
+    /// Start a new line unless the recording is already at one.
+    pub fn ensure_line_start(&mut self) -> Result<()> {
+        if self.at_line_start {
+            return Ok(());
+        }
+        self.text("\n")
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {

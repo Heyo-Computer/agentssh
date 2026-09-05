@@ -13,7 +13,7 @@ pub async fn run(context_name: &str, command: &[String], timeout: Option<u64>) -
 
     let id = store::new_session_id();
     let recording = store::recording_path(&id)?;
-    let (cols, rows) = crate::session::interactive::term_size();
+    let (cols, rows) = crate::session::record_size();
     let session = store::Session {
         id: id.clone(),
         context: context_name.to_string(),
@@ -29,12 +29,15 @@ pub async fn run(context_name: &str, command: &[String], timeout: Option<u64>) -
         recording: recording.to_string_lossy().into_owned(),
     };
 
+    // An exec channel has no PTY, so its output arrives with bare LF endings
+    // that a terminal would staircase on replay.
     let mut recorder = Writer::create(
         &recording,
         cols as u32,
         rows as u32,
         &format!("{context_name}: {command_line}"),
-    )?;
+    )?
+    .newline_fixup(true);
     store::create_session(&conn, &session)?;
     recorder.event(EventKind::Marker, &format!("run: {command_line}"))?;
 
@@ -83,7 +86,7 @@ pub fn shell_join(args: &[String]) -> String {
         .join(" ")
 }
 
-fn shell_escape(s: &str) -> String {
+pub fn shell_escape(s: &str) -> String {
     if !s.is_empty()
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || "-_./=:@%+,".contains(c))
